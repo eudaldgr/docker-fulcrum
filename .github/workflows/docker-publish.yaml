@@ -1,0 +1,46 @@
+name: Docker Build and Push
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    name: Build and push to GitHub Container Registry
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set VERSION and TAG
+        run: |
+          TAG="${GITHUB_REF#refs/*/}" # v2.1.0-1
+          VERSION="${TAG#v}"          # 2.1.0-1
+          VERSION="${VERSION%%-*}"    # 2.1.0
+          MINOR="${VERSION%.*}"       # 2.1
+          MAJOR="${VERSION%%.*}"      # 2
+
+          echo "TAG=${TAG}" >> $GITHUB_ENV
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "MINOR=${MINOR}" >> $GITHUB_ENV
+          echo "MAJOR=${MAJOR}" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+
+      - name: Setup Docker buildx
+        run: docker buildx create --use
+
+      - name: Run Docker buildx
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION=${{ env.VERSION }} \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:${{ env.TAG }} \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:v${{ env.VERSION }} \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:v${{ env.MINOR }} \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:v${{ env.MAJOR }} \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:latest \
+            --push .
