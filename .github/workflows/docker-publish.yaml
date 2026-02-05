@@ -5,7 +5,7 @@ on:
     - cron: "0 4/12 * * *"
 
 jobs:
-  rocksdb:
+  build:
     name: Build and push image if new release
     runs-on: ubuntu-22.04
     permissions:
@@ -33,7 +33,7 @@ jobs:
         id: ghcr
         run: |
           set -euo pipefail
-          TOKEN="$(curl -fsSL -u "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" "https://ghcr.io/token?service=ghcr.io&scope=repository:${{ github.repository_owner }}/scratchless:pull" | jq -r '.token')"
+          TOKEN="$(curl -fsSL -u "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" "https://ghcr.io/token?service=ghcr.io&scope=repository:${{ github.repository_owner }}/fulcrum:pull" | jq -r '.token')"
           if [ -z "${TOKEN}" ] || [ "${TOKEN}" = "null" ]; then
             echo "Failed to obtain GHCR token" >&2
             exit 1
@@ -45,13 +45,13 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ steps.version.outputs.version }}"
-          TAGS_JSON="$(curl -fsSL -H "Authorization: Bearer ${{ steps.ghcr.outputs.token }}" "https://ghcr.io/v2/${{ github.repository_owner }}/scratchless/tags/list")"
-          if echo "${TAGS_JSON}" | jq -e --arg t "rocksdb-${TAG}" '.tags | index($t) != null' > /dev/null; then
+          TAGS_JSON="$(curl -fsSL -H "Authorization: Bearer ${{ steps.ghcr.outputs.token }}" "https://ghcr.io/v2/${{ github.repository_owner }}/fulcrum/tags/list")"
+          if echo "${TAGS_JSON}" | jq -e --arg t "fulcrum-${TAG}" '.tags | index($t) != null' > /dev/null; then
             echo "needs_build=false" >> "$GITHUB_OUTPUT"
-            echo "Tag rocksdb-${TAG} already exists in GHCR, skipping build."
+            echo "Tag fulcrum-${TAG} already exists in GHCR, skipping build."
           else
             echo "needs_build=true" >> "$GITHUB_OUTPUT"
-            echo "Tag rocksdb-${TAG} missing in GHCR, will build."
+            echo "Tag fulcrum-${TAG} missing in GHCR, will build."
           fi
 
       - uses: actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
         if: steps.exists.outputs.needs_build == 'true'
         run: docker buildx create --use
 
-      - name: Build and push RocksDB image
+      - name: Build and push image
         if: steps.exists.outputs.needs_build == 'true'
         run: |
           set -euo pipefail
