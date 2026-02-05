@@ -1,46 +1,83 @@
-name: Docker Build and Push
+name: Auto Build
 on:
-  push:
-    tags:
-      - "*"
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4/12 * * *"
 
 jobs:
-  build:
-    name: Build and push to GitHub Container Registry
+  rocksdb:
+    name: Build and push image if new release
     runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Set VERSION and TAG
+      - name: Resolve latest version
+        id: version
         run: |
-          TAG="${GITHUB_REF#refs/*/}" # v2.1.0-1
-          VERSION="${TAG#v}"          # 2.1.0-1
-          VERSION="${VERSION%%-*}"    # 2.1.0
-          MINOR="${VERSION%.*}"       # 2.1
-          MAJOR="${VERSION%%.*}"      # 2
+          set -euo pipefail
+          LATEST_TAG="$(curl -fsSL https://api.github.com/repos/cculianu/Fulcrum/releases/latest | jq -r '.tag_name')"
+          if [ -z "${LATEST_TAG}" ] || [ "${LATEST_TAG}" = "null" ]; then
+            echo "Could not resolve latest release tag"
+            exit 1
+          fi
+          VERSION="${LATEST_TAG#v}"
+          MINOR="${VERSION%.*}"
+          MAJOR="${VERSION%%.*}"
+          echo "tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "minor=${MINOR}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
 
-          echo "TAG=${TAG}" >> $GITHUB_ENV
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
-          echo "MINOR=${MINOR}" >> $GITHUB_ENV
-          echo "MAJOR=${MAJOR}" >> $GITHUB_ENV
+      - name: Get GHCR token
+        id: ghcr
+        run: |
+          set -euo pipefail
+          TOKEN="$(curl -fsSL -u "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" "https://ghcr.io/token?service=ghcr.io&scope=repository:${{ github.repository_owner }}/scratchless:pull" | jq -r '.token')"
+          if [ -z "${TOKEN}" ] || [ "${TOKEN}" = "null" ]; then
+            echo "Failed to obtain GHCR token" >&2
+            exit 1
+          fi
+          echo "token=${TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag exists in GHCR
+        id: exists
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.version }}"
+          TAGS_JSON="$(curl -fsSL -H "Authorization: Bearer ${{ steps.ghcr.outputs.token }}" "https://ghcr.io/v2/${{ github.repository_owner }}/scratchless/tags/list")"
+          if echo "${TAGS_JSON}" | jq -e --arg t "rocksdb-${TAG}" '.tags | index($t) != null' > /dev/null; then
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+            echo "Tag rocksdb-${TAG} already exists in GHCR, skipping build."
+          else
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
+            echo "Tag rocksdb-${TAG} missing in GHCR, will build."
+          fi
 
       - uses: actions/checkout@v4
+        if: steps.exists.outputs.needs_build == 'true'
 
       - name: Login to GitHub Container Registry
+        if: steps.exists.outputs.needs_build == 'true'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
 
       - name: Setup Docker buildx
+        if: steps.exists.outputs.needs_build == 'true'
         run: docker buildx create --use
 
-      - name: Run Docker buildx
+      - name: Build and push RocksDB image
+        if: steps.exists.outputs.needs_build == 'true'
         run: |
+          set -euo pipefail
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            --build-arg VERSION=${{ env.VERSION }} \
-            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:${{ env.TAG }} \
-            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:v${{ env.VERSION }} \
-            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:v${{ env.MINOR }} \
-            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:v${{ env.MAJOR }} \
+            --file Dockerfile \
+            --build-arg APP_ROOT=/scratchless \
+            --build-arg APP_VERSION=${{ steps.version.outputs.version }} \
+            --cache-from type=registry,ref=ghcr.io/${{ github.repository_owner }}/fulcrum:buildcache \
+            --cache-to type=registry,ref=ghcr.io/${{ github.repository_owner }}/fulcrum:buildcache,mode=max \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:${{ steps.version.outputs.version }} \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:${{ steps.version.outputs.minor }} \
+            --tag ghcr.io/${{ github.repository_owner }}/fulcrum:${{ steps.version.outputs.major }} \
             --tag ghcr.io/${{ github.repository_owner }}/fulcrum:latest \
             --push .
