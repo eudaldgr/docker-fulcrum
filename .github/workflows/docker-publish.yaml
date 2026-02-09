@@ -46,12 +46,10 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.version.outputs.version }}"
           TAGS_JSON="$(curl -fsSL -H "Authorization: Bearer ${{ steps.ghcr.outputs.token }}" "https://ghcr.io/v2/${{ github.repository_owner }}/fulcrum/tags/list")"
-          if echo "${TAGS_JSON}" | jq -e --arg t "fulcrum-${TAG}" '.tags | index($t) != null' > /dev/null; then
+          if echo "${TAGS_JSON}" | jq -e --arg t "${TAG}" '.tags | index($t) != null' > /dev/null; then
             echo "needs_build=false" >> "$GITHUB_OUTPUT"
-            echo "Tag fulcrum-${TAG} already exists in GHCR, skipping build."
           else
             echo "needs_build=true" >> "$GITHUB_OUTPUT"
-            echo "Tag fulcrum-${TAG} missing in GHCR, will build."
           fi
 
       - uses: actions/checkout@v4
