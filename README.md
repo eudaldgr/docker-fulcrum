@@ -1,5 +1,7 @@
 # docker-fulcrum
 
+> ⚠️ **This repository has been archived.** For the latest container images, please visit <https://github.com/vegops/containers>.
+
 > Run Fulcrum in Docker
 
 A Docker configuration with sane defaults for running a full Fulcrum node.
